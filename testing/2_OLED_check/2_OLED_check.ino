@@ -1,4 +1,4 @@
-// SensorChecker_RevA OLED test
+// SensorChecker_RevA & RevB OLED test
 // Check that the 128x64 pixel OLED is working
 
 // PD7 = sensor select (digital pin 19)
