@@ -1,4 +1,6 @@
-/* SensorChecker_RevA Combined heart + gape sensor check
+/* SensorChecker_RevB Combined heart + gape sensor check
+ *  For use with RevB boards, which have a 4-posiition DIP switch
+ *  that can be used to change the behavior during Heart sensor mode
 
   // PD7 = sensor select (digital pin 19)
   // PA2 = SDA1
