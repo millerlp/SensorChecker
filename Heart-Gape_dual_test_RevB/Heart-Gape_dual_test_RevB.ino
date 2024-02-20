@@ -1,14 +1,34 @@
 /* SensorChecker_RevB Combined heart + gape sensor check
  *  For use with RevB boards, which have a 4-posiition DIP switch
  *  that can be used to change the behavior during Heart sensor mode
+ *  
+ *  Use the red switch on the board to switch between Heart mode and Gape mode
+ *  
+ *  In Heart mode, the 4-position DIP switch is active, and can be used to switch
+ *  between fast output to the Arduino Serial Plotter or slower output to the 
+ *  onboard OLED screen (just shows wake and sleep current draw). The left-most
+ *  switch changes between these two modes.
+ *  The other 3 DIP switches allow you to set the brightness of the heart sensor
+ *  IR LED, with the default being 20, then 30, 50, and 90. Higher values may
+ *  saturate the sensor and return a useless signal, while low values may not
+ *  return a strong enough signal through a thick shell. 
+ *  
+ *  In Gape mode, the OLED shows a quick-updating value from the Hall sensor 
+ *  and a slower-updating measurement of the wake and sleep current draw. The
+ *  Hall sensor reading is also output to the Arduino serial Plotter. The 
+ *  4-position DIP switch has no effect in Gape mode. 
 
-  // PD7 = sensor select (digital pin 19)
+  // PD7 = sensor select (digital pin 19) Heart vs Gape mode
   // PA2 = SDA1
   // PA3 = SCL1
   // PD1 = green LED (digital pin 13)
   // PD2 = red LED  (digital pin 14)
   // PC2 = Hall sensor SLEEP line (digital pin 10)
   // PD0 = Hall sensor voltage out (analog pin A0)
+  // PD3 = DIP1 switch
+  // PD4 = DIP2 switch
+  // PD5 = DIP3 switch
+  // PD6 = DIP4 switch
 */
 
 #include "Arduino.h"
@@ -24,14 +44,11 @@
 #define SENSOR_SELECT 19 // high = Gape power, low = heart power
 #define HALL_SLEEP 25
 #define ANALOG_IN A10
-
-#define DIP1 15  // PD3
-#define DIP2 16  // PD4
-#define DIP3 17  // PD5
-#define DIP4 18  // PD6
-
-
-
+// 4 positions on the DIP switch, used to change options for the heart sensor
+#define DIP1 15  // PD3 switch between fast plotter output and slower OLED
+#define DIP2 16  // PD4 increase IRledBrightness to first level above default (20)
+#define DIP3 17  // PD5 increase IRledBrightness to second level
+#define DIP4 18  // PD6 increase IRledBrightness to third level
 
 enum sensorMode {
   HEART,  // equivalent to 0
@@ -80,7 +97,7 @@ MAX30105 max3010x;
 // sensor configurations
 byte ledMode = 2; //Options: 1 = Red only, 2 = Red + IR, 3 = Red + IR + Green. Only use 2
 byte REDledBrightness = 1; // low value of 0 shuts it off, 1 is barely on
-byte IRledBrightness = 30;  // 0 = off, 255 = fully on. A value of ~30 is good on a human finger
+byte IRledBrightness = 20;  // 0 = off, 255 = fully on. A value of ~30 is good on a human finger
 byte sampleAverage = 1; //Options: 1, 2, 4, 8, 16, 32, but only use 1. The others are too slow
 int pulseWidth = 215; //Options: 69, 118, 215, 411, units microseconds. Applies to all active LEDs. Recommend 215
 // For 118us, max sampleRate = 1000; for 215us, max sampleRate = 800, for 411us, max sampleRate = 400
@@ -213,17 +230,18 @@ void loop() {
       uint32_t heartBuffer = restartAndSampleMAX3010x(max3010x, IRledBrightness, \
                              sampleAverage, ledMode, sampleRate, pulseWidth, adcRange, \
                              REDledBrightness, false);
-      Serial.println(heartBuffer);
-      digitalWrite(GRNLED, !digitalRead(GRNLED));
+      Serial.println(heartBuffer);  // Send output to the Serial plotter
+      digitalWrite(GRNLED, !digitalRead(GRNLED)); // Toggle the green LED to show activity
+      
       // If user wants slower output to the OLED showing current usage, run this next section
       if (serialHeartMode == OLED) {
           loopCounter++; 
-          // get current
+          // Get current
           movingAverageCurrSum += ina219.getCurrent_mA();
           // If shunt resistor isn't 0.1ohm, correct the calculated current
 //          movingAverageCurr = movingAverageCurr / (actualShuntResistance / 0.1);
 
-          // Now take reading while asleep
+          // Now take reading while the heart sensor is asleep
           max3010x.shutDown(); delay(10); // shut down sensor
           // Sample sensor current while sensor is asleep
           movingAverageSleepCurrSum += ina219.getCurrent_mA();
@@ -247,7 +265,7 @@ void loop() {
                 oled.print(movingAverageSleepCurr);
                 movingAverageCurrSum = 0; // reset
                 movingAverageSleepCurrSum = 0; // reset
-                loopCounter = 0;
+                loopCounter = 0;  // reset
           }
                 
       }
@@ -256,7 +274,7 @@ void loop() {
       //------------- Gape mode ------------------------
       loopCounter++; 
       digitalWrite(HALL_SLEEP, HIGH); // turn on hall effect sensor
-      digitalWrite(GRNLED, !digitalRead(GRNLED));
+      digitalWrite(GRNLED, !digitalRead(GRNLED));  // toggle green LED to show activity
       unsigned int HallValue = readHall(ANALOG_IN);
       oled.clear(50,128,0,1); // Clear latter half of row 0
       oled.setCursor(60,0); // set cursor to column 60, row 0 (for 2x font)
@@ -285,12 +303,12 @@ void loop() {
         oled.print(movingAverageSleepCurr);
         movingAverageCurrSum = 0; // reset
         movingAverageSleepCurrSum = 0; // reset
-        loopCounter = 0;
+        loopCounter = 0;    // reset
         if (movingAverageCurr > 4.0) {
-          // Flash the Red LED if the current draw is higher than the expected 3mA
+          // Flash the Red LED if the current draw is higher than the expected 3mA for a A1395 sensor
           digitalWrite(REDLED, !digitalRead(REDLED));
         } else {
-          digitalWrite(REDLED, HIGH);
+          digitalWrite(REDLED, HIGH);  // make sure it's off if there's no problem
         }
       }
 
@@ -378,12 +396,15 @@ uint32_t restartAndSampleMAX3010x(MAX30105 &max3010x, byte IRledBrightness, byte
 //-----------------------------------------------------
 // SampleDIPswitchIR
 byte SampleDIPswitchIR (void) {
-      IRledBrightness = 20; // Default
+      IRledBrightness = 20; // Default value if all switches are off
+      
       // The DIP is wired so that when the switch is towards the silkscreen
       // label on the board it is grounded (low), so we invert the result from
       // the digitalRead here. 
       if (!digitalRead(DIP2)) { IRledBrightness = 30; } 
       if (!digitalRead(DIP3)) { IRledBrightness = 50; }
       if (!digitalRead(DIP4)) { IRledBrightness = 90; }
+      // The 'highest' active value will be the one used, so if DIP4 is
+      // active then the other 'lower' switches will be ignored
       return(IRledBrightness);
 }
