@@ -47,7 +47,7 @@ float movingAverageCurrSum = 0;
 // Number of samples for moving average:
 const byte averageCount = 8;
 byte averageCounter = 0;
-float actualShuntResistance = 0.75; // ideally 0.1, but enter actual number here
+float actualShuntResistance = 0.1; // ideally 0.1, but enter actual number here
 
 
 //--------------------------------------
