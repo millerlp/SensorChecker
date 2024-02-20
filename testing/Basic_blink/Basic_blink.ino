@@ -1,4 +1,4 @@
-// SensorChecker_RevA blink routine
+// SensorChecker_RevA or RevB blink routine
 // PD7 = sensor select (digital pin 19)
 // PA2 = SDA1
 // PA3 = SCL1
