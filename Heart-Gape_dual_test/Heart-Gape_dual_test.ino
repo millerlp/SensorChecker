@@ -24,8 +24,11 @@
 #define ANALOG_IN A10
 char sensorMode = 0; // Used to set gape or heart mode
 
-uint32_t loopDelayMS = 50; // Loop time in milliseconds
+uint32_t loopDelayMS = 100; // Loop time in milliseconds
+uint32_t longloopDelayMS = 1000; // Time for updating OLED current measure
 uint32_t oldMillis = 0; // time keeping variable
+uint32_t oldlongloopMillis = 0; // time keeping variable
+int loopCounter = 0; 
 
 //************************
 // OLED setup
@@ -44,9 +47,8 @@ float loadVoltage = 0;  // Estimated battery voltage (prior to the shunt resisto
 float Watts = 0; // Estimated power output, Watts
 float movingAverageCurr = 0;
 float movingAverageCurrSum = 0;
-// Number of samples for moving average:
-const byte averageCount = 8;
-byte averageCounter = 0;
+float movingAverageSleepCurr = 0;
+float movingAverageSleepCurrSum = 0;
 float actualShuntResistance = 0.1; // ideally 0.1, but enter actual number here
 
 
@@ -134,18 +136,19 @@ void setup() {
 
   oled.clear();
   oled.home();
-  if (sensorMode == 1) {
+  if (sensorMode == 1) { // gape mode
     oled.println("Gape");
     oled.println(" On  Sleep");
     oled.println();
     oled.print(" mA  mA");
     digitalWrite(REDLED, LOW);
-  } else if (sensorMode == 0) {
+  } else if (sensorMode == 0) {  // heart mode
     oled.println("Heart");
     oled.println(" On  Sleep");
     oled.println();
     oled.print(" mA  mA");
     digitalWrite(GRNLED, LOW);
+    loopDelayMS = 50; // speed up main loop
   }
   delay(1000);
   oldMillis = millis();
@@ -167,69 +170,79 @@ void loop() {
                              sampleAverage, ledMode, sampleRate, pulseWidth, adcRange, \
                              REDledBrightness, false);
       Serial.println(heartBuffer);
-      // get current
-      movingAverageCurrSum = 0; // reset
-      for (int x = 0; x < averageCount; x++) {
-        movingAverageCurrSum += ina219.getCurrent_mA();
-        delay(1);
-      }
-      movingAverageCurr = movingAverageCurrSum / averageCount; // Calculate average, mA
-      // If shunt resistor isn't 0.1ohm, correct the calculated current
-      movingAverageCurr = movingAverageCurr / (actualShuntResistance / 0.1);
+      loopCounter++; 
+          // Get current
+          movingAverageCurrSum += ina219.getCurrent_mA();
+          // If shunt resistor isn't 0.1ohm, correct the calculated current
+//          movingAverageCurr = movingAverageCurr / (actualShuntResistance / 0.1);
 
-      //      oled.clear(60,128,0,1); // Clear latter half of row 0
-      //      oled.setCursor(60,0); // set cursor to column 60, row 0 (for 2x font)
-      //      oled.print(sampleBuffer); // print the heart value to the OLED
+          // Now take reading while the heart sensor is asleep
+          max3010x.shutDown(); delay(10); // shut down sensor
+          // Sample sensor current while sensor is asleep
+          movingAverageSleepCurrSum += ina219.getCurrent_mA();
 
-            oled.clear(0,128,4,5); // Clear rows 4&5 (when using 2x font this clears the 3rd row)
-            oled.setCursor(0,4); // Set cursor to column 0, 2nd row (for 2x font)
-            oled.print(movingAverageCurr); oled.print(" ");
+          // If shunt resistor isn't 0.1ohm, correct the calculated current
+//          movingAverageSleepCurr = movingAverageSleepCurr / (actualShuntResistance / 0.1);
+                
 
-      // Now take reading while asleep
-      max3010x.shutDown(); delay(10); // shut down sensor
-      // Sample sensor current while sensor is asleep
-      movingAverageCurrSum = 0; // reset
-      for (int x = 0; x < averageCount; x++) {
-        movingAverageCurrSum += ina219.getCurrent_mA();
-        delay(1);
-      }
-      movingAverageCurr = movingAverageCurrSum / averageCount; // Calculate average, mA
-      // If shunt resistor isn't 0.1ohm, correct the calculated current
-      movingAverageCurr = movingAverageCurr / (actualShuntResistance / 0.1);
-            oled.print(movingAverageCurr);
-
+          if ( millis() - oldlongloopMillis > longloopDelayMS) {
+                oldlongloopMillis = millis(); // update time keeper
+                movingAverageCurr = movingAverageCurrSum / loopCounter; // Calculate average, mA
+                // If shunt resistor isn't 0.1ohm, correct the calculated current
+                //movingAverageCurr = movingAverageCurr / (actualShuntResistance / 0.1);
+                movingAverageSleepCurr = movingAverageSleepCurrSum / loopCounter; // average, mA
+                // If shunt resistor isn't 0.1ohm, correct the calculated current
+                //movingAverageSleepCurr = movingAverageSleepCurr / (actualShuntResistance / 0.1);
+                //------ Print results to OLED
+                oled.clear(0,128,4,5); // Clear rows 4&5 (when using 2x font this clears the 3rd row)
+                oled.setCursor(0,4); // Set cursor to column 0, 2nd row (for 2x font)
+                oled.print(movingAverageCurr); oled.print(" ");
+                oled.print(movingAverageSleepCurr);
+                movingAverageCurrSum = 0; // reset
+                movingAverageSleepCurrSum = 0; // reset
+                loopCounter = 0;  // reset
+          }
     } else if (sensorMode == 1) { // Gape mode
       //------------- Gape mode ------------------------
-      movingAverageCurrSum = 0; // reset
+            loopCounter++; 
       digitalWrite(HALL_SLEEP, HIGH); // turn on hall effect sensor
+      digitalWrite(GRNLED, !digitalRead(GRNLED));  // toggle green LED to show activity
       unsigned int HallValue = readHall(ANALOG_IN);
       oled.clear(50,128,0,1); // Clear latter half of row 0
       oled.setCursor(60,0); // set cursor to column 60, row 0 (for 2x font)
 //    oled.clear(0,128,2,3); // Clear rows 2&3 (when using 2x font this clears the 2nd row)
 //    oled.setCursor(0,2); // Set cursor to column 0, 2nd row (for 2x font)
       oled.print(HallValue);
-      for (int x=0; x < averageCount; x++){
-        movingAverageCurrSum += ina219.getCurrent_mA();
-        delay(1);
-      }
-      movingAverageCurr = movingAverageCurrSum / averageCount; // Calculate average, mA
-      // If shunt resistor isn't 0.1ohm, correct the calculated current
-      movingAverageCurr = movingAverageCurr / (actualShuntResistance / 0.1); 
-      oled.clear(0,128,4,5); // Clear rows 4&5 (when using 2x font this clears the 3rd row)
-      oled.setCursor(0,4); // Set cursor to column 0, 2nd row (for 2x font)
-      oled.print(movingAverageCurr); oled.print(" ");
-    //  oled.print(" mA");
+      Serial.println(HallValue); // also output to Serial Monitor or Plotter
+
+      movingAverageCurrSum += ina219.getCurrent_mA();
       // Now take reading while asleep
       digitalWrite(HALL_SLEEP, LOW); delay(5); // turn off hall effect sensor
-      movingAverageCurrSum = 0; // reset
-      for (int x=0; x < averageCount; x++){
-          movingAverageCurrSum += ina219.getCurrent_mA();
-          delay(1);
+      movingAverageSleepCurrSum += ina219.getCurrent_mA();
+      
+      if ( millis() - oldlongloopMillis > longloopDelayMS) {
+          oldlongloopMillis = millis();
+          movingAverageCurr = movingAverageCurrSum / loopCounter; // Calculate average, mA
+        // If shunt resistor isn't 0.1ohm, correct the calculated current
+//        movingAverageCurr = movingAverageCurr / (actualShuntResistance / 0.1); 
+          movingAverageSleepCurr = movingAverageSleepCurrSum / loopCounter; // Calculate average, mA
+          // If shunt resistor isn't 0.1ohm, correct the calculated current
+//        movingAverageSleepCurr = movingAverageSleepCurr / (actualShuntResistance / 0.1); 
+        
+        oled.clear(0,128,4,5); // Clear rows 4&5 (when using 2x font this clears the 3rd row)
+        oled.setCursor(0,4); // Set cursor to column 0, 2nd row (for 2x font)
+        oled.print(movingAverageCurr); oled.print(" ");
+        oled.print(movingAverageSleepCurr);
+        movingAverageCurrSum = 0; // reset
+        movingAverageSleepCurrSum = 0; // reset
+        loopCounter = 0;    // reset
+        if (movingAverageCurr > 4.0) {
+          // Flash the Red LED if the current draw is higher than the expected 3mA for a A1395 sensor
+          digitalWrite(REDLED, !digitalRead(REDLED));
+        } else {
+          digitalWrite(REDLED, HIGH);  // make sure it's off if there's no problem
+        }
       }
-      movingAverageCurr = movingAverageCurrSum / averageCount; // Calculate average, mA
-      // If shunt resistor isn't 0.1ohm, correct the calculated current
-      movingAverageCurr = movingAverageCurr / (actualShuntResistance / 0.1);
-      oled.print(movingAverageCurr);
     }
   }
 
