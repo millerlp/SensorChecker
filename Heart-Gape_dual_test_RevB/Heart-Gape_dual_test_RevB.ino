@@ -136,6 +136,7 @@ void setup() {
   pinMode(ANALOG_IN, INPUT); // Hall sensor input channel
 
   Serial.begin(57600);
+  Serial.println();
 
   Wire.begin();
   Wire.setClock(400000L);
